@@ -5,6 +5,7 @@ require "base64"
 require "fileutils"
 require "json"
 require "net/http"
+require "open3"
 require "optparse"
 require "securerandom"
 require "time"
@@ -132,8 +133,11 @@ class Sodexo
 
     results = list.map { |account| status_result(store, account) }
     if @json_output
-      puts(JSON.pretty_generate("accounts" => results))
+      puts(JSON.pretty_generate("accounts" => results, "codex_version" => codex_version))
     else
+      puts("codex: #{codex_version}")
+      puts
+
       results.each_with_index do |result, index|
         puts if index.positive?
         account_status_text(result, store["active_account_id"])
@@ -222,6 +226,16 @@ class Sodexo
 
   def commands
     %w[current import list ls path paths show status switch use]
+  end
+
+  def codex_version
+    output, status = Open3.capture2e("codex", "--version")
+    return "-" unless status.success?
+
+    version = output.lines.first.to_s.strip
+    version.empty? ? "-" : version
+  rescue SystemCallError
+    "-"
   end
 
   def current_account_id
@@ -349,8 +363,8 @@ class Sodexo
     format_time(time.to_i)
   end
 
-  def format_window(window, fallback:)
-    return ["window #{fallback}", "-"] unless window
+  def format_window(window)
+    return unless window
 
     used = window["used_percent"]
     left = used ? [100.0 - used.to_f, 0.0].max : nil
@@ -677,8 +691,11 @@ class Sodexo
     result = status_result(store, account)
 
     if @json_output
-      puts(JSON.pretty_generate(result))
+      puts(JSON.pretty_generate(result.merge("codex_version" => codex_version)))
     else
+      puts("codex: #{codex_version}")
+      puts
+
       status_text(result)
     end
 
@@ -767,8 +784,7 @@ class Sodexo
 
     if usage
       rows << ["plan", usage["plan_type"] || "-"]
-      rows << format_window(usage["primary"], fallback: "5h")
-      rows << format_window(usage["secondary"], fallback: "7d")
+      rows.concat([usage["primary"], usage["secondary"]].filter_map { |window| format_window(window) })
       rows << ["resets", usage["resets"]] if usage.key?("resets")
       rows << ["credits", usage["credits"]] if status_credits?(usage["credits"])
     end
